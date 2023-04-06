@@ -1,0 +1,6 @@
+[submodule "eoas_pyutils"]
+	path = eoas_pyutils
+	url = git@github.com:olmozavala/eoas-pyutils.git
+[submodule "ai_common"]
+	path = ai_common
+	url = git@github.com:olmozavala/ai-common.git
