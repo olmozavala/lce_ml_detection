@@ -35,13 +35,10 @@ if np.amax(lons) > 180:
     lons = lons - 360
 viz_obj = EOAImageVisualizer(lats=lats, lons=lons)
 
-def preproc_data(proc_id):
+def preproc_data(proc_id, folder, output_folder):
     '''It generates a mask of the contours and saves it to a file'''
-    # input_folder = "/home/olmozavala/Dropbox/MyProjects/EOAS/COAPS/GOFFISH_UGOS3/ProgramsRepo/data/Geodesic/raw"
-    # output_folder = "/home/olmozavala/Dropbox/MyProjects/EOAS/COAPS/GOFFISH_UGOS3/ProgramsRepo/data/Geodesic/processed"
-    input_folder = "/nexsan/people/lhiron/UGOS/Lag_coh_eddies/eddy_contours/altimetry_2010_14day_coh/"
-    output_folder = "/Net/work/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours/"
-    create_folder(output_folder)
+    print(f'Processing folder {folder} with proc_id {proc_id}')
+    input_folder = f"/nexsan/people/lhiron/UGOS/Lag_coh_eddies/eddy_contours/altimetry_{folder}/"
     all_files = os.listdir(input_folder)
     all_files.sort()
     for i, c_file in enumerate(all_files):
@@ -64,6 +61,15 @@ def preproc_data(proc_id):
 
 if __name__ == '__main__':
     # ----------- Parallel -------
+    folders = ['2010_coh_14days_contour_d7', '2020_coh_14days_contour_d7', '2020_coh_14days_contour_d0']
+    # folders = ['2020_coh_14days_contour_d7']
+    # folders = ['2010_coh_14days_contour_d7']
+
     NUM_PROC = 20
-    p = Pool(NUM_PROC)
-    p.map(preproc_data, range(NUM_PROC))
+    for c_folder in folders:
+        output_folder = f"/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_{c_folder}/"
+        create_folder(output_folder)
+        p = Pool(NUM_PROC)
+        params = [(i, c_folder, output_folder) for i in range(NUM_PROC)]
+        p.starmap(preproc_data, params)
+        p.close()

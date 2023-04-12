@@ -28,7 +28,8 @@ def read_contours_polygons(file_name):
 
     all_contours_polygons = []
     for i in range(1, num_contours + 1):
-        cont_lons = contours[f'xb0_{i:03d}'][0, :] - 360
+        lons = contours[f'xb0_{i:03d}'][0, :]
+        cont_lons = [x - 360 if x > 180 else x for x in lons]
         cont_lats = contours[f'yb0_{i:03d}'][0, :]
 
         geom_poly = [(cont_lons[i], cont_lats[i]) for i in range(len(cont_lons))]

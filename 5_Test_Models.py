@@ -1,58 +1,53 @@
 # External
-import os
-from pandas import DataFrame
+import torch
+from torch.utils.data import Dataset, DataLoader
 import pandas as pd
-import time
 from os.path import join
-import numpy as np
-import xarray as xr
-from tensorflow.keras.utils import plot_model
-
+from proj_ai.Generators import EddyDataset
+from datetime import datetime
 # Common
 import sys
+import xarray as xr
+import numpy as np
+import matplotlib.pyplot as plt
+from shapely.geometry import Polygon
 # AI common
 sys.path.append("ai_common")
-from ai_common.constants.AI_params import TrainingParams, EvaluationParams, ModelParams
-from ai_common.models.modelSelector import select_2d_model
-import ai_common.training.trainingutils as utilsNN
 # EOAS Utils
 sys.path.append("eoas_pyutils")
 from eoas_pyutils.viz_utils.eoa_viz import EOAImageVisualizer
-from eoas_pyutils.io_utils.io_common import create_folder, all_files_in_folder
+from eoas_pyutils.io_utils.io_common import create_folder
+from proj_io.contours import read_contours_mask_and_polygons
+from io_utils.dates_utils import get_month_and_day_of_month_from_day_of_year
+from models.ModelsEnum import Models
+from models.ModelSelector import select_model
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = "cpu"
 # From project
-from config.MainConfig import get_config
-from proj_io.io_reader import generateXY
+data_folder = "/unity/f1/ozavala/DATA/GOFFISH"
+folders = ['2010_coh_14days_contour_d7', '2020_coh_14days_contour_d7', '2020_coh_14days_contour_d0']
+c_folder = folders[1]
 
-from sklearn.metrics import *
+ssh_folder = join(data_folder, "AVISO")
+preproc_folder = join(data_folder,f"EddyDetection/PreprocContours_{c_folder}")
+contours_folder = f"/nexsan/people/lhiron/UGOS/Lag_coh_eddies/eddy_contours/altimetry_{c_folder}/"
+output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection/"
+summary_file = join(output_folder, "Summary", "summary.csv")
 
+bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used in preprocessing
+output_resolution = 0.1
 
-config = get_config()
-"""
-:param config:
-:return:
-"""
+test_dataset = EddyDataset(ssh_folder, preproc_folder, bbox, output_resolution)
+test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+
+print("Total number of test samples: ", len(test_dataset))
+
 # *********** Reads the parameters ***********
-output_folder = config[EvaluationParams.output_folder]
-summary_file = join(output_folder, "summary.csv")
 df = pd.read_csv(summary_file)
 
 save_predictions = False
 save_imgs = True
-
-#  ========= Obtain the total number of examples (this most be the same as in the training phase) ============
-input_folder = config[TrainingParams.input_folder]
-lr_names, lr_paths = all_files_in_folder(join(input_folder, 'GOMb0.04'), file_ext="2d.nc")
-lr_names.sort()
-lr_paths.sort()
-hr_names, hr_paths = all_files_in_folder(join(input_folder, 'GOMb0.01'), file_ext="2d.nc")
-hr_names.sort()
-hr_paths.sort()
-tot_examples = len(lr_names)
-
-# ============== Configurations needed ================
-in_dims = config[ModelParams.INPUT_SIZE]
-inc_factor = config[ModelParams.INC_RES_FACTOR]
 
 # Iterates over all the models in the file
 for model_id in range(len(df)):
@@ -64,58 +59,55 @@ for model_id in range(len(df)):
     c_output_folder =join(output_folder,model_name)
     create_folder(c_output_folder)
 
-    # *********** Chooses the proper model ***********
-    print('Reading model ....')
-    model = select_2d_model(config)
-    plot_model(model, to_file=join(c_output_folder,F'{model_name}.png'), show_shapes=True)
-
     # *********** Reads the weights***********
-    print('Reading weights ....')
-    model.load_weights(model_weights_file)
-
-    # **************** Split definition *****************
-    SEED = 0
-    np.random.seed(SEED)  # Use this to always train with the same split for all the models
-    val_perc = config[TrainingParams.validation_percentage]
-    test_perc = config[TrainingParams.test_percentage]
-    [train_ids, val_ids, test_ids] = utilsNN.split_train_validation_and_test(tot_examples,
-                                                                             val_percentage=val_perc,
-                                                                             test_percentage=test_perc)
+    print("Initializing model...")
+    model = select_model(Models.UNET_2D, num_levels=4, cnn_per_level=2, input_channels=1,
+                         output_channels=1, start_filters=32, kernel_size=3).to(device)
+    print('Reading model ....')
+    model.load_state_dict(torch.load(model_weights_file, map_location=device))
+    model.to(device)
+    #
+    # plot_model(model, to_file=join(c_output_folder,F'{model_name}.png'), show_shapes=True)
+    # graph = torchviz.make_dot(output_tensor, params=dict(model.named_parameters()))
+    # graph.render("model", format="pdf")
 
     # Working only with the test indexes
-    for c_id in range(len(test_ids)):
-        file_id = test_ids[c_id]
-        # TODO here you could test in batches also
-        X, Y = generateXY(hr_path=hr_paths[file_id],
-                          lr_path=lr_paths[file_id],
-                          inc_factor=inc_factor,
-                          in_dims=in_dims)
+    for file, (data, target) in test_loader:
+        data, target = data.to(device), target.to(device)
+        output = model(data)
+        file_name_parts = file[0].split("_")
+        print(file_name_parts)
+        year = int(file_name_parts[2])
+        day_year = int(file_name_parts[4].replace(".nc",""))
+        month, day_month = get_month_and_day_of_month_from_day_of_year(day_year, year)
+        c_date = datetime.strptime(f"{year}-{month}-{day_month}", '%Y-%m-%d')
+        ssh_file = join(ssh_folder, f"{c_date.year}-{c_date.month:02d}.nc")
+        contours_file = join(contours_folder, f"eddies_altimetry_{c_date.year}_14days_{day_year:03d}.mat")
+        print(contours_file)
 
-        X = np.expand_dims(X, axis=0)
-        nn_raw_output = model.predict(X, verbose=1)
-        #
-        lr_ds = xr.open_dataset(lr_paths[file_id])
-        lr_ds_crop = lr_ds.isel(Latitude=slice(0, in_dims[0]), Longitude=slice(0, in_dims[1]), MT=0)  # Cropping by value
-        lats = lr_ds_crop.Latitude
-        lons = lr_ds_crop.Longitude
-        vizobj = EOAImageVisualizer(disp_images=False, output_folder=c_output_folder, lats=[lats],lons=[lons], show_var_names=True)
-        vizobj.plot_2d_data_np(np.swapaxes(X[0], 0, 2), ['U', 'V'], F'X_{lr_names[file_id]}_lr', file_name_prefix=F'X_{lr_names[file_id]}_lr', flip_data=True, rot_90=True)
-        vizobj.plot_2d_data_np(np.swapaxes(nn_raw_output[0], 0, 2), ['U', 'V'], F'Y_{hr_names[file_id]}_hr', file_name_prefix=F'Y_{hr_names[file_id]}_hr', flip_data=True, rot_90=True)
+        ds = xr.open_dataset(ssh_file)
+        ds = ds.sel(latitude=slice(bbox[0], bbox[1]), longitude=slice(bbox[2], bbox[3]))
+        lats = ds.latitude.values
+        lons = ds.longitude.values
 
-    # *********** Makes a dataframe to contain the DSC information **********
-    # metrics_params = config[ClassificationParams.metrics]
-    # metrics_dict = {met.model_name: met.value for met in metrics_params}
+        print(f"min lat: {np.amin(lats)}, max lat: {np.amax(lats)}")
+        print(f"min lon: {np.amin(lons)}, max lon: {np.amax(lons)}")
+        lons = lons - 360 if np.amax(lons) > 180 else lons
+        print("Done!")
 
-    # ------------------- Making prediction -----------
-    # print('\t Making prediction....')
-    # X = 1
-    # nn_raw_output = model.predict(X, verbose=1)
-    #
-    # mse_mft = mean_squared_error(mft,obs)
-    # mse_nn = mean_squared_error(output_nn_all_original,obs)
-    # print(F'MSE MFT: {mse_mft}  NN: {mse_nn}')
-    #
-    # if save_predictions:
-    #     print('\t Saving Prediction...')
-    # if save_imgs:
-    #     print('\t Saving Images...')
+        # %%
+        # Plotting some SSH data
+        print(ds.head())
+        viz_obj = EOAImageVisualizer(lats=lats, lons=lons)
+        contours_mask = np.zeros_like(ds['adt'][day_month, :, :])
+        all_contours_polygons, contours_mask = read_contours_mask_and_polygons(contours_file, contours_mask, lats, lons)
+        viz_obj.__setattr__('additional_polygons', [Polygon(x) for x in all_contours_polygons])
+        # viz_obj.plot_3d_data_npdict(ds,  var_names=['adt'], z_levels=[day_month], title=f'SSH and contours for {c_date}')
+        # viz_obj.plot_2d_data_np(contours_mask,  var_names=['mask'],  title='Eddies mask')
+        target_flip = np.flip(target[0, 0, :, :].detach().cpu().numpy(), axis=0)
+        target_flip = np.where(target_flip == 0, np.nan, target_flip)
+        pred_flip = np.flip(output[0,0,:,:].detach().cpu().numpy(), axis=0)
+        pred_flip = np.where(pred_flip < 0.1, np.nan, pred_flip)
+        viz_obj.plot_2d_data_xr({'adt': ds['adt'][day_month], 'target': target_flip,
+                                 'prediction':pred_flip}, var_names=['adt', 'target', 'prediction'],
+                                title=c_date)
