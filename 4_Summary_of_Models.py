@@ -51,6 +51,7 @@ summary = pd.DataFrame.from_dict(df)
 print(F"Models summary: {summary}")
 
 create_folder(output_folder)
+summary = summary.sort_values(by="Loss value")
 summary.to_csv(join(output_folder,"summary.csv"))
 
 #%% ------- Plot the summary of the models ------------
@@ -58,14 +59,14 @@ output_file = join(output_folder,"summary.jpg")
 # plot_summary(summary)
 LOSS  = "Loss value"
 names = summary.Name.values
-names = [x.split('d7')[-1] for x in summary.Name.values]
+names = ['_'.join(x.split('_')[:4]) for x in summary.Name.values]
 losses = summary[LOSS].values
 fig, ax = plt.subplots(figsize=(10,6))
 ax.scatter(range(len(names)), losses)
 ax.set_title(F"Validation Loss by Model")
 for i, label in enumerate(names):
     ax.annotate(label, (i, losses[i]), textcoords="offset points",
-                xytext=(5, -15), ha='center', va='center', rotation=25, fontsize=12)
+                xytext=(5, -15), ha='left', va='center', rotation=0, fontsize=12)
 
 ax.set_xlim(-0.5, len(names)+0.5)
 ax.grid(True)

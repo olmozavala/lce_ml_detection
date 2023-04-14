@@ -16,8 +16,10 @@ sys.path.append("ai_common")
 # EOAS Utils
 sys.path.append("eoas_pyutils")
 from eoas_pyutils.viz_utils.eoa_viz import EOAImageVisualizer
+from eoas_pyutils.viz_utils.constants import BackgroundType
 from eoas_pyutils.io_utils.io_common import create_folder
 from proj_io.contours import read_contours_mask_and_polygons
+from proj_io.ssh_io import read_ssh_by_date
 from io_utils.dates_utils import get_month_and_day_of_month_from_day_of_year
 from models.ModelsEnum import Models
 from models.ModelSelector import select_model
@@ -37,11 +39,8 @@ summary_file = join(output_folder, "Summary", "summary.csv")
 
 bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used in preprocessing
 output_resolution = 0.1
-
-test_dataset = EddyDataset(ssh_folder, preproc_folder, bbox, output_resolution)
-test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
-
-print("Total number of test samples: ", len(test_dataset))
+perc_files_to_use = 0.1
+threshold = 0.9
 
 # *********** Reads the parameters ***********
 df = pd.read_csv(summary_file)
@@ -56,12 +55,21 @@ for model_id in range(len(df)):
     model_weights_file = model["Path"]
     print(F"Model model_name: {model_name}")
 
-    c_output_folder =join(output_folder,model_name)
+    days_before = int(model_name.split("_")[1])
+    days_after = int(model_name.split("_")[3])
+    test_dataset = EddyDataset(ssh_folder, preproc_folder, bbox, output_resolution,
+                               days_before=days_before,
+                               days_after=days_after,
+                               shuffle=True, perc_files= perc_files_to_use)
+    test_loader = DataLoader(test_dataset, batch_size=1, shuffle=False)
+    print("Total number of test samples: ", len(test_dataset))
+
+    c_output_folder = join(output_folder,"TestModels", model_name)
     create_folder(c_output_folder)
 
     # *********** Reads the weights***********
     print("Initializing model...")
-    model = select_model(Models.UNET_2D, num_levels=4, cnn_per_level=2, input_channels=1,
+    model = select_model(Models.UNET_2D, num_levels=4, cnn_per_level=2, input_channels=1+days_before+days_after,
                          output_channels=1, start_filters=32, kernel_size=3).to(device)
     print('Reading model ....')
     model.load_state_dict(torch.load(model_weights_file, map_location=device))
@@ -85,29 +93,23 @@ for model_id in range(len(df)):
         contours_file = join(contours_folder, f"eddies_altimetry_{c_date.year}_14days_{day_year:03d}.mat")
         print(contours_file)
 
-        ds = xr.open_dataset(ssh_file)
-        ds = ds.sel(latitude=slice(bbox[0], bbox[1]), longitude=slice(bbox[2], bbox[3]))
-        lats = ds.latitude.values
-        lons = ds.longitude.values
-
-        print(f"min lat: {np.amin(lats)}, max lat: {np.amax(lats)}")
-        print(f"min lon: {np.amin(lons)}, max lon: {np.amax(lons)}")
-        lons = lons - 360 if np.amax(lons) > 180 else lons
-        print("Done!")
+        ssh, lats, lons = read_ssh_by_date(c_date, ssh_folder, bbox=bbox, output_resolution=output_resolution)
 
         # %%
         # Plotting some SSH data
-        print(ds.head())
-        viz_obj = EOAImageVisualizer(lats=lats, lons=lons)
-        contours_mask = np.zeros_like(ds['adt'][day_month, :, :])
+        # viz_obj = EOAImageVisualizer(lats=lats, lons=lons, contourf=True, disp_images=False,
+        #                              output_folder=c_output_folder, background_type=BackgroundType.NONE)
+        viz_obj = EOAImageVisualizer(lats=lats, lons=lons, contourf=False, disp_images=False,
+                                     output_folder=c_output_folder)
+        contours_mask = np.zeros_like(ssh)
         all_contours_polygons, contours_mask = read_contours_mask_and_polygons(contours_file, contours_mask, lats, lons)
         viz_obj.__setattr__('additional_polygons', [Polygon(x) for x in all_contours_polygons])
         # viz_obj.plot_3d_data_npdict(ds,  var_names=['adt'], z_levels=[day_month], title=f'SSH and contours for {c_date}')
         # viz_obj.plot_2d_data_np(contours_mask,  var_names=['mask'],  title='Eddies mask')
-        target_flip = np.flip(target[0, 0, :, :].detach().cpu().numpy(), axis=0)
-        target_flip = np.where(target_flip == 0, np.nan, target_flip)
-        pred_flip = np.flip(output[0,0,:,:].detach().cpu().numpy(), axis=0)
-        pred_flip = np.where(pred_flip < 0.1, np.nan, pred_flip)
-        viz_obj.plot_2d_data_xr({'adt': ds['adt'][day_month], 'target': target_flip,
-                                 'prediction':pred_flip}, var_names=['adt', 'target', 'prediction'],
-                                title=c_date)
+        target = target[0, 0, :, :].detach().cpu().numpy()
+        target = np.where(target == 0, np.nan, target)
+        pred = output[0,0,:,:].detach().cpu().numpy()
+        pred = np.where(pred< threshold, np.nan, pred)
+        viz_obj.plot_2d_data_xr({'adt': ssh, 'target': target,
+                                 'prediction':pred}, var_names=['adt', 'target', 'prediction'],
+                                title=c_date, file_name_prefix=f"{c_date}_prediction")

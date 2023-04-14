@@ -12,6 +12,7 @@ import h5py
 sys.path.append("eoas_pyutils")
 from io_utils.io_common import create_folder
 from viz_utils.eoa_viz import EOAImageVisualizer
+from proj_io.ssh_io import largest_number_divisible_by_8
 from proc_utils.geometries import intersect_polygon_grid
 # Local
 from proj_io.contours import read_contours_mask_and_polygons
@@ -29,6 +30,9 @@ lats_orig = ds.latitude.values
 lons_orig = ds.longitude.values
 lats = np.linspace(np.amin(lats_orig), np.amax(lats_orig), int((np.amax(lats_orig) - np.amin(lats_orig)) / output_resolution))
 lons = np.linspace(np.amin(lons_orig), np.amax(lons_orig), int((np.amax(lons_orig) - np.amin(lons_orig)) / output_resolution))
+lats = lats[:largest_number_divisible_by_8(lats.shape[0])]
+lons = lons[:largest_number_divisible_by_8(lons.shape[0])]
+
 ds = ds.interp(latitude=lats, longitude=lons)  # Increase output_resolution
 
 if np.amax(lons) > 180:
