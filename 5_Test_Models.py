@@ -1,14 +1,18 @@
 # External
+import os.path
+
 import torch
 from torch.utils.data import Dataset, DataLoader
 import pandas as pd
 from os.path import join
 from proj_ai.Generators import EddyDataset
+from PIL import Image
 from datetime import datetime
 # Common
 import sys
 import xarray as xr
 import numpy as np
+import time
 import matplotlib.pyplot as plt
 from shapely.geometry import Polygon
 # AI common
@@ -32,15 +36,15 @@ folders = ['2010_coh_14days_contour_d7', '2020_coh_14days_contour_d7', '2020_coh
 c_folder = folders[1]
 
 ssh_folder = join(data_folder, "AVISO")
-preproc_folder = join(data_folder,f"EddyDetection/PreprocContours_{c_folder}")
-contours_folder = f"/nexsan/people/lhiron/UGOS/Lag_coh_eddies/eddy_contours/altimetry_{c_folder}/"
+preproc_folder = [join(data_folder,f"EddyDetection/PreprocContours_{c_folder}")]
+eddies_folder = f"/nexsan/people/lhiron/UGOS/Lag_coh_eddies/eddy_contours/altimetry_{c_folder}/"
 output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection/"
 summary_file = join(output_folder, "Summary", "summary.csv")
 
 bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used in preprocessing
 output_resolution = 0.1
-perc_files_to_use = 0.1
-threshold = 0.9
+perc_files_to_use = 0.2
+threshold = 0.5
 
 # *********** Reads the parameters ***********
 df = pd.read_csv(summary_file)
@@ -50,6 +54,7 @@ save_imgs = True
 
 # Iterates over all the models in the file
 for model_id in range(len(df)):
+    start_time = time.time()
     model = df.iloc[model_id]
     model_name = model["Name"]
     model_weights_file = model["Path"]
@@ -79,37 +84,51 @@ for model_id in range(len(df)):
     # graph = torchviz.make_dot(output_tensor, params=dict(model.named_parameters()))
     # graph.render("model", format="pdf")
 
+    out_folder_predictions = join(c_output_folder, "Predictions")
+    create_folder(out_folder_predictions)
     # Working only with the test indexes
     for file, (data, target) in test_loader:
         data, target = data.to(device), target.to(device)
         output = model(data)
-        file_name_parts = file[0].split("_")
-        print(file_name_parts)
-        year = int(file_name_parts[2])
-        day_year = int(file_name_parts[4].replace(".nc",""))
-        month, day_month = get_month_and_day_of_month_from_day_of_year(day_year, year)
-        c_date = datetime.strptime(f"{year}-{month}-{day_month}", '%Y-%m-%d')
-        ssh_file = join(ssh_folder, f"{c_date.year}-{c_date.month:02d}.nc")
-        contours_file = join(contours_folder, f"eddies_altimetry_{c_date.year}_14days_{day_year:03d}.mat")
-        print(contours_file)
 
-        ssh, lats, lons = read_ssh_by_date(c_date, ssh_folder, bbox=bbox, output_resolution=output_resolution)
+        # These two lines are just to include the time to save the predicitons to disk (TODO we still need to save as netcdf with proper coordinates)
+        filename_prediction = join(out_folder_predictions, os.path.basename(file[0].replace(".nc", ".jpg")))
+        Image.fromarray((output.cpu().detach().numpy()[0,0,:,:] * 255).astype(np.uint8)).save(filename_prediction)
 
-        # %%
-        # Plotting some SSH data
-        # viz_obj = EOAImageVisualizer(lats=lats, lons=lons, contourf=True, disp_images=False,
-        #                              output_folder=c_output_folder, background_type=BackgroundType.NONE)
-        viz_obj = EOAImageVisualizer(lats=lats, lons=lons, contourf=False, disp_images=False,
-                                     output_folder=c_output_folder)
-        contours_mask = np.zeros_like(ssh)
-        all_contours_polygons, contours_mask = read_contours_mask_and_polygons(contours_file, contours_mask, lats, lons)
-        viz_obj.__setattr__('additional_polygons', [Polygon(x) for x in all_contours_polygons])
-        # viz_obj.plot_3d_data_npdict(ds,  var_names=['adt'], z_levels=[day_month], title=f'SSH and contours for {c_date}')
-        # viz_obj.plot_2d_data_np(contours_mask,  var_names=['mask'],  title='Eddies mask')
-        target = target[0, 0, :, :].detach().cpu().numpy()
-        target = np.where(target == 0, np.nan, target)
-        pred = output[0,0,:,:].detach().cpu().numpy()
-        pred = np.where(pred< threshold, np.nan, pred)
-        viz_obj.plot_2d_data_xr({'adt': ssh, 'target': target,
-                                 'prediction':pred}, var_names=['adt', 'target', 'prediction'],
-                                title=c_date, file_name_prefix=f"{c_date}_prediction")
+        print("Time to process one sample: ", time.time() - start_time)
+        start_time = time.time()
+        # file_name_parts = file[0].split("_")
+        # print(file_name_parts)
+        # year = int(file_name_parts[1])
+        # day_year = int(file_name_parts[-1].replace(".nc",""))
+        # month, day_month = get_month_and_day_of_month_from_day_of_year(day_year, year)
+        # c_date = datetime.strptime(f"{year}-{month}-{day_month}", '%Y-%m-%d')
+        # c_date_str = f"{year}-{month}-{day_month}"
+        # ssh_file = join(ssh_folder, f"{c_date.year}-{c_date.month:02d}.nc")
+        # contours_file = join(eddies_folder, f"eddies_altimetry_{c_date.year}_14days_{day_year:03d}.mat")
+        # print(contours_file)
+        #
+        # ssh, lats, lons = read_ssh_by_date(c_date, ssh_folder, bbox=bbox, output_resolution=output_resolution)
+        #
+        # # %%
+        # # Plotting some SSH data
+        # viz_obj = EOAImageVisualizer(lats=lats, lons=lons, contourf=False, disp_images=False,
+        #                                 background=BackgroundType.BLUE_MARBLE_HR,
+        #                                 output_folder=c_output_folder)
+        # contours_mask = np.zeros_like(ssh)
+        # all_contours_polygons, contours_mask = read_contours_mask_and_polygons(contours_file, contours_mask, lats, lons)
+        # viz_obj.__setattr__('additional_polygons', [Polygon(x) for x in all_contours_polygons])
+        # # viz_obj.plot_3d_data_npdict(ds,  var_names=['adt'], z_levels=[day_month], title=f'SSH and contours for {c_date}')
+        # # viz_obj.plot_2d_data_np(contours_mask,  var_names=['mask'],  title='Eddies mask')
+        # target = target[0, 0, :, :].detach().cpu().numpy()
+        # target = np.where(target == 0, np.nan, target)
+        # pred = output[0,0,:,:].detach().cpu().numpy()
+        # pred = np.where(pred < threshold, np.nan, pred)
+        # # viz_obj.plot_2d_data_xr({'adt': ssh, 'target': target,
+        # #                          'prediction':pred}, var_names=['adt', 'target', 'prediction'],
+        # #                         title=c_date, file_name_prefix=f"{c_date}_prediction")
+        # viz_obj.plot_2d_data_xr({'LAVD': ssh, 'Prediction': pred}, var_names=['LAVD', 'Prediction'],
+        #                 title=[f'{c_date_str} Target', f'{c_date_str} Prediction'], file_name_prefix=f"{c_date}_prediction")
+
+#%%
+

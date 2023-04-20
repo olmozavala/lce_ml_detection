@@ -38,7 +38,10 @@ for cur_model in all_folders:
                 name = cur_model
                 loss = np.around(min_loss,5)
                 path = join(cur_folder, model)
-                best_model = [name, loss, path]
+                days_before = int(name.split('_')[1])
+                days_after = int(name.split('_')[3])
+                years = ','.join([str(x) for x in (2010, 2015, 2018) if name.find(str(x)) != -1])
+                best_model = [name, loss, path, days_before, days_after, years]
         experiments.append(best_model)
 
 # Build a dictionary from data
@@ -46,6 +49,9 @@ df = {
     "Name": [x[0] for x in experiments],
     "Loss value": [x[1] for x in experiments],
     "Path": [x[2] for x in experiments],
+    "Days before": [x[3] for x in experiments],
+    "Days after": [x[4] for x in experiments],
+    "Years": [x[5] for x in experiments]
 }
 summary = pd.DataFrame.from_dict(df)
 print(F"Models summary: {summary}")
@@ -57,19 +63,28 @@ summary.to_csv(join(output_folder,"summary.csv"))
 #%% ------- Plot the summary of the models ------------
 output_file = join(output_folder,"summary.jpg")
 # plot_summary(summary)
-LOSS  = "Loss value"
-names = summary.Name.values
-names = ['_'.join(x.split('_')[:4]) for x in summary.Name.values]
-losses = summary[LOSS].values
+LOSS = "Loss value"
 fig, ax = plt.subplots(figsize=(10,6))
-ax.scatter(range(len(names)), losses)
-ax.set_title(F"Validation Loss by Model")
-for i, label in enumerate(names):
-    ax.annotate(label, (i, losses[i]), textcoords="offset points",
-                xytext=(5, -15), ha='left', va='center', rotation=0, fontsize=12)
+grouped = summary.groupby("Years")
+for group_key, group_data in grouped:
+    print(group_key, group_data)
+    names = group_data.Name.values
+    # names = ['_'.join(x.split('_')[:4]) for x in group_data.Name.values]
+    # names = [f'DB {x.split("_")[1]} DA {x.split("_")[3]}' for x in names]
+    names = [f'-{x.split("_")[1]} +{x.split("_")[3]}' for x in names]
+    losses = group_data[LOSS].values
+    ax.scatter(range(len(losses)), losses, label=group_key)
 
-ax.set_xlim(-0.5, len(names)+0.5)
-ax.grid(True)
-ax.set_ylabel("Validation Loss (MSE)")
+    for i, label in enumerate(names):
+        ax.annotate(label, (i, losses[i]), textcoords="offset points",
+                    xytext=(5, -15), ha='left', va='center', rotation=0, fontsize=12)
+
+ax.legend()
+ax.set_title(F"Validation Loss by Model", fontsize=16)
+ax.set_xlim(-0.5, len(names)-0.2)
+ax.set_ylim(0.052, 0.078)
+# ax.grid(True)
+ax.set_ylabel("Validation Loss (MSE)", fontsize=14)
+ax.set_xlabel("Multiple trainings sorted by validation error", fontsize=14)
 plt.savefig(join(output_file))
 plt.show()

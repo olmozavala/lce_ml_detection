@@ -65,11 +65,13 @@ def preproc_data(proc_id, folder, output_folder):
 
 if __name__ == '__main__':
     # ----------- Parallel -------
-    folders = ['2010_coh_14days_contour_d7', '2020_coh_14days_contour_d7', '2020_coh_14days_contour_d0']
+    # folders = ['2010_coh_14days_contour_d7', '2020_coh_14days_contour_d7', '2020_coh_14days_contour_d0']
     # folders = ['2020_coh_14days_contour_d7']
     # folders = ['2010_coh_14days_contour_d7']
+    # folders = ['2015_coh_14days_contour_d7']
+    folders = ['2018_coh_14days_contour_d7']
 
-    NUM_PROC = 20
+    NUM_PROC = 1
     for c_folder in folders:
         output_folder = f"/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_{c_folder}/"
         create_folder(output_folder)
