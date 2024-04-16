@@ -1,9 +1,12 @@
+# %%
 import os
 # External libraries
 import torch
 import torch.optim as optim
 import matplotlib.pyplot as plt
 from torch.utils.data import Dataset, DataLoader
+from torch.utils.data import DataLoader, Dataset, random_split
+
 # Local libraries
 import torch.multiprocessing as mp
 import multiprocessing as mp
@@ -18,47 +21,63 @@ import time
 
 #%% ----- DataLoader --------
 
-def parallel_training(gpu, days_before, days_after, input_folders):
+def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
+    # 
+    # print(f"inside with gpu:{gpu} days_before:{days_before} days_after:{days_after} input_folder:{input_folder} run:{run}")
+    # # Wait 5 seconds
+    # time.sleep(5)
+    # return
+
     start_time = time.time()
     device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-    print(f"days_before: {days_before}, days_after: {days_after}, input_folders: {input_folders}")
+    print(f"days_before: {days_before}, days_after: {days_after}, input_folders: {input_folder}")
 
-    data_folder = "/unity/f1/ozavala/DATA/GOFFISH"
     bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used in preprocessing
     output_resolution = 0.1
-    val_perc = 90 / 365  # For year 2020 how many files to use for validation 2 months =
 
-    val_folder = '2020_coh_14days_contour_d7'
-    ssh_folder = join(data_folder, "AVISO")
+    if run == "shared":
+        aviso_folder = "/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM"
+        eddies_folder = join("/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022", input_folder)
+        output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022"
+    elif run == "local":
+        aviso_folder = "/conda/ozavala/data/GoM"
+        eddies_folder = join("/conda/ozavala/data/PreprocContours_ALL_1993_2022", input_folder)
+        output_folder = "/conda/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022"
+    elif run == "ram":
+        aviso_folder = "/dev/shm/ozavala/data/GoM"
+        eddies_folder = join("/dev/shm/ozavala/data/PreprocContours_ALL_1993_2022", input_folder)
+        output_folder = "/dev/shm/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022"
 
-    eddies_folder = [join(data_folder, f"EddyDetection/PreprocContours_{folder}") for folder in input_folders]
-    eddies_folder_val = [join(data_folder, f"EddyDetection/PreprocContours_{val_folder}")]
-    output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection"
 
-    if type(input_folders) is list:
-        model_name = f"DaysBefore_{days_before}_DaysAfter_{days_after}_{'_'.join(input_folders)}"
-    else:
-        model_name = f"DaysBefore_{days_before}_DaysAfter_{days_after}_{input_folders}"
+    model_name = f"DaysBefore_{days_before}_DaysAfter_{days_after}_{input_folder}"
 
     print(f"######### Model name: {model_name} #########")
 
-    train_dataset = EddyDataset(ssh_folder, eddies_folder, bbox, output_resolution, days_before=days_before, days_after=days_after)
-    val_dataset = EddyDataset(ssh_folder, eddies_folder_val, bbox, output_resolution, perc_files=val_perc,
-                              days_before=days_before, days_after=days_after)
+    dataset = EddyDataset(aviso_folder, eddies_folder, bbox, output_resolution, days_before=days_before, days_after=days_after)
+
+    # Define the sizes for training, validation, and test sets
+    total_size = len(dataset)
+    train_size = int(0.8 * total_size)
+    val_size = int(0.1 * total_size)
+
+    # Use random_split to split the dataset
+    train_dataset = torch.utils.data.Subset(dataset, range(0, train_size))
+    val_dataset = torch.utils.data.Subset(dataset, range(train_size, train_size + val_size))
 
     print("Total number of training samples: ", len(train_dataset))
     print("Total number of validation samples: ", len(val_dataset))
 
     # Create DataLoaders for training and validation
-    # workers = 30  # For some reason, if I set the number of workers I can't store all the data in memory
+    workers = 16  # For some reason, if I set the number of workers I can't store all the data in memory
     # train_loader = DataLoader(train_dataset, batch_size=80, shuffle=True, num_workers=workers)
     # val_loader = DataLoader(val_dataset, batch_size=10, num_workers=workers)
-    train_loader = DataLoader(train_dataset, batch_size=80, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=10, shuffle=True)
+
+    train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=workers)
+    val_loader = DataLoader(val_dataset, batch_size=16, shuffle=True, num_workers=workers)
     print("Done loading data!")
 
-    #%% Visualize the data
+    # Visualize the data
     # Plot from a batch of training data
     # print("Plotting data...")
     # plot_data_loader= DataLoader(train_dataset, batch_size=1, shuffle=True)
@@ -72,7 +91,7 @@ def parallel_training(gpu, days_before, days_after, input_folders):
     # plt.title("Example of SSH and eddies contour")
     # print("Done!")
 
-    #%% Initialize the model, loss, and optimizer
+    # Initialize the model, loss, and optimizer
     print("Initializing model...")
     model = select_model(Models.UNET_2D, num_levels=4, cnn_per_level=2, input_channels=1+days_before+days_after,
                          output_channels=1, start_filters=32, kernel_size=3).to(device)
@@ -89,28 +108,32 @@ def parallel_training(gpu, days_before, days_after, input_folders):
     print("--- %s seconds ---" % (time.time() - start_time))
     print("Done!")
 
-if __name__ == '__main__':
-    # ['2010_coh_14days_contour_d7', '2015_coh_14days_contour_d7', '2018_coh_14days_contour_d7', '2020_coh_14days_contour_d7', '2020_coh_14days_contour_d0']
-    all_input_folders = [['2010_coh_14days_contour_d7', '2015_coh_14days_contour_d7', '2018_coh_14days_contour_d7'],
-                         ['2010_coh_14days_contour_d7', '2015_coh_14days_contour_d7'],
-                         ['2010_coh_14days_contour_d7']]
-    # all_days_before = [0, 6]
-    # all_days_after = [0, 6]
-    all_days_before = [0]
-    all_days_after = [0]
 
-    # Parallelizing by input folders
+# %%
+all_input_folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20]]
+all_days_before = [0, 1, 2, 6]
+all_days_after = [0, 5]
 
-    NUM_PROC = 1
-    mp.set_start_method('spawn')
-
-    for gpu in range(NUM_PROC):
+# -------------------- Parallel training --------------------
+# mp.set_start_method('spawn')
+NUM_PROC = 4
+i = 0
+runs_per_model = 3
+for run in range(runs_per_model):
+    for days_after in all_days_after:
         for days_before in all_days_before:
-            for days_after in all_days_after:
-                # Parallel trianing (only by folder for now)
-                p = mp.Process(target=parallel_training, args=(gpu, days_before, days_after, all_input_folders[gpu]))
+            for input_folder in all_input_folders:
+                gpu = i % NUM_PROC
+                p = mp.Process(target=parallel_training, args=(gpu, days_before, days_after, input_folder, "shared"))
                 p.start()
+                i += 1
+        # Wait until all the processes are finished
+        p.join()
+        print("After join")
 
-            # Sequential training
-            # for input_folders in all_input_folders:
-            #     parallel_training(days_before, days_after, input_folders)
+
+# --------------- Sequential training --------------------
+# for input_folder in all_input_folders:
+#     for days_before in all_days_before:
+#         for days_after in all_days_after:
+#             parallel_training(0, days_before, days_after, input_folder, run="shared")

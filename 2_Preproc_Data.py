@@ -1,4 +1,4 @@
-# External
+# %% External
 import sys
 from datetime import datetime
 import xarray as xr
@@ -18,8 +18,7 @@ from proc_utils.geometries import intersect_polygon_grid
 from proj_io.contours import read_contours_mask_and_polygons
 
 # SSH file used as reference for the size of the grid
-# ssh_file = "/data/GOFFISH/AVISO/2010-01.nc"
-ssh_file = "/Net/work/ozavala/DATA/GOFFISH/AVISO/2010-01.nc"  # Just a test file to read the grid
+ssh_file = "/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM//2010-01.nc"  # Just a test file to read the grid
 day_of_month = 5
 bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used by DataReader
 output_resolution = 0.1  # Needs to be the same used in DataReader
@@ -39,10 +38,9 @@ if np.amax(lons) > 180:
     lons = lons - 360
 viz_obj = EOAImageVisualizer(lats=lats, lons=lons)
 
-def preproc_data(proc_id, folder, output_folder):
+def preproc_data(proc_id, input_folder, output_folder):
     '''It generates a mask of the contours and saves it to a file'''
-    print(f'Processing folder {folder} with proc_id {proc_id}')
-    input_folder = f"/nexsan/people/lhiron/UGOS/Lag_coh_eddies/eddy_contours/altimetry_{folder}/"
+    print(f'Processing folder {input_folder} with proc_id {proc_id}')
     all_files = os.listdir(input_folder)
     all_files.sort()
     for i, c_file in enumerate(all_files):
@@ -62,20 +60,18 @@ def preproc_data(proc_id, folder, output_folder):
             # Save to netcdf
             ds_contours.to_netcdf(join(output_folder, c_file.replace('.mat', '.nc')))
 
+# %%
+# ----------- Parallel -------
+root_folder = "/nexsan/people/lhiron/UGOS/Lagrangian_eddy_altimetry/eddy_contours/"
+output_folder = f"/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022/"
+# folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20, 30]]
+folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [20, 30]]
 
-if __name__ == '__main__':
-    # ----------- Parallel -------
-    # folders = ['2010_coh_14days_contour_d7', '2020_coh_14days_contour_d7', '2020_coh_14days_contour_d0']
-    # folders = ['2020_coh_14days_contour_d7']
-    # folders = ['2010_coh_14days_contour_d7']
-    # folders = ['2015_coh_14days_contour_d7']
-    folders = ['2018_coh_14days_contour_d7']
-
-    NUM_PROC = 1
-    for c_folder in folders:
-        output_folder = f"/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_{c_folder}/"
-        create_folder(output_folder)
-        p = Pool(NUM_PROC)
-        params = [(i, c_folder, output_folder) for i in range(NUM_PROC)]
-        p.starmap(preproc_data, params)
-        p.close()
+NUM_PROC = 30
+for c_folder in folders:
+    output_folder = join(output_folder, c_folder)
+    create_folder(output_folder)
+    p = Pool(NUM_PROC)
+    params = [(i, join(root_folder, c_folder), output_folder) for i in range(NUM_PROC)]
+    p.starmap(preproc_data, params)
+    p.close()

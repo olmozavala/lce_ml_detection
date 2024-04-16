@@ -28,21 +28,26 @@ def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epoch
     create_folder(logs_folder)
 
     writer = SummaryWriter(logs_folder)
-    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=50, verbose=True)
+    scheduler = lr_scheduler.ReduceLROnPlateau(optimizer, 'min', patience=10, verbose=True)
 
     min_val_loss = 1e10
     best_last_epoch = 0
-    patience = 100 # Number of epochs to wait before stopping the training
+    patience = 20 # Number of epochs to wait before stopping the training
     for epoch in range(num_epochs):
+        # Time each epoch
+        start_time_epoch = datetime.now()
         model.train()
         # Loop over each batch from the training set (to update the model)
         for file, (data, target) in train_loader:
+            # Time each batch
+            start_time_batch = datetime.now()
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
             output = model(data)
             loss = loss_func(output, target)
             loss.backward()
             optimizer.step()
+            # print(f'Batch time: {datetime.now() - start_time_batch}')
 
         # Evaluate the model
         model.eval()
@@ -83,7 +88,8 @@ def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epoch
         if epoch == 0:
             writer.add_graph(model, images)
 
-        print(f'Epoch: {epoch+1}, Val loss: {cur_val_loss:.4f}')
+        print(f'------------ Epoch: {epoch+1}, Val loss: {cur_val_loss:.4f} Time: {datetime.now() - start_time_epoch}')
+
         if epoch - best_last_epoch > patience:
             print(f'Early stopping after {epoch} epochs')
             break
