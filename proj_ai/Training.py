@@ -7,18 +7,9 @@ from os.path import join
 from eoas_pyutils.io_utils.io_common import create_folder
 import torch.optim.lr_scheduler as lr_scheduler
 
+
 def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epochs, device, output_folder='training', model_name=''):
-    '''
-    Main function in charge of training a model
-    :param model:
-    :param optimizer:
-    :param loss_func:
-    :param train_loader:
-    :param val_loader:
-    :param num_epochs:
-    :param device:
-    :return:
-    '''
+
     cur_time = datetime.now()
     model_name = f'{model_name}_{cur_time.strftime("%Y-%m-%d_%H_%M")}'
     logs_folder = join(output_folder, 'logs', model_name)
@@ -32,7 +23,7 @@ def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epoch
 
     min_val_loss = 1e10
     best_last_epoch = 0
-    patience = 20 # Number of epochs to wait before stopping the training
+    patience = 30 # Number of epochs to wait before stopping the training
     for epoch in range(num_epochs):
         # Time each epoch
         start_time_epoch = datetime.now()
@@ -40,6 +31,7 @@ def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epoch
         # Loop over each batch from the training set (to update the model)
         for file, (data, target) in train_loader:
             # Time each batch
+            # print(f"Number of thredds: {torch.get_num_threads()}")
             start_time_batch = datetime.now()
             data, target = data.to(device), target.to(device)
             optimizer.zero_grad()
@@ -79,10 +71,10 @@ def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epoch
         output = model(images)
         # Here we should add some input output images to the tensorboard
         imgs_to_show = 4
-        grid_images = torchvision.utils.make_grid( torch.flip(images[:imgs_to_show, 0, :, :], dims=[1]), nrow=imgs_to_show)  # 4 images per row (only show one date)
+        grid_images = torchvision.utils.make_grid( torch.flip(images[:imgs_to_show, :, :, :], dims=[1]), nrow=imgs_to_show)  # 4 images per row (only show one date)
         grid_labels = torchvision.utils.make_grid( torch.flip(labels[:imgs_to_show, :, :, :], dims=[2]), nrow=imgs_to_show)  # 4 images per row
         grid_outputs = torchvision.utils.make_grid(torch.flip(output[:imgs_to_show, :, :, :], dims=[2]), nrow=imgs_to_show)  # 4 images per row
-        writer.add_image('input (validation)', grid_images, epoch)
+        # writer.add_image('input (validation)', grid_images, epoch)
         writer.add_image('target (validation)', grid_labels, epoch)
         writer.add_image('output (validation)', grid_outputs, epoch)
         if epoch == 0:

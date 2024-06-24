@@ -5,8 +5,8 @@ from os.path import join
 in_folders = ['/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM',
               '/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022']
 
-output_folders = ['/dev/shm/ozavala/data','/conda/ozavala/data']
-
+# output_folders = ['/dev/shm/ozavala/data','/conda/ozavala/data']
+output_folders = ['/dev/shm/ozavala/data']
 
 for in_folder in in_folders:
     for root_out_folder in output_folders:
@@ -25,9 +25,10 @@ for in_folder in in_folders:
             os.makedirs(out_folder)
 
         # Copy force folder recursively
-        cmd = f"cp -r {in_folder} {root_out_folder}"
+        # cmd = f"cp -r {in_folder} {root_out_folder}"
+        cmd = f"find {in_folder} -name '*.nc' -type f -exec cp --parents {{}} {root_out_folder} \\;"
         print(cmd)
-        os.system(cmd)
+        # os.system(cmd)
 
         # Mv entire folder one level up
         # cmd = f"mv {out_folder}/*.* {'/'.join(out_folder.split('/')[:-1])}"

@@ -62,14 +62,14 @@ def preproc_data(proc_id, input_folder, output_folder):
 
 # %%
 # ----------- Parallel -------
-root_folder = "/nexsan/people/lhiron/UGOS/Lagrangian_eddy_altimetry/eddy_contours/"
-output_folder = f"/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022/"
-# folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20, 30]]
-folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [20, 30]]
+# root_folder = "/nexsan/people/lhiron/UGOS/Lagrangian_eddy_altimetry/eddy_contours/"
+root_folder = "/nexsan/people/lhiron/UGOS/Lagrangian_eddy_altimetry/eddy_contours/gaps_filled"
+output_folder_original = f"/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022_gaps_filled/"
+folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20, 30]]
 
-NUM_PROC = 30
+NUM_PROC = 30  #  Number of processors to use
 for c_folder in folders:
-    output_folder = join(output_folder, c_folder)
+    output_folder = join(output_folder_original, c_folder)
     create_folder(output_folder)
     p = Pool(NUM_PROC)
     params = [(i, join(root_folder, c_folder), output_folder) for i in range(NUM_PROC)]

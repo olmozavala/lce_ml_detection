@@ -12,7 +12,7 @@ import xarray as xr
 from os.path import join
 from torch.utils.data import Dataset, DataLoader
 from io_utils.dates_utils import get_month_and_day_of_month_from_day_of_year
-from proj_io.ssh_io import read_ssh_by_date
+from proj_io.ssh_io import read_ssh_by_date_fast
 import numpy as np
 import pickle
 
@@ -39,7 +39,7 @@ class EddyDataset(Dataset):
         self.output_resolution = output_resolution
 
         # Verifying if the file is already saved
-        file_name = join(self.eddies_folder, f"preloaded_db_{days_before}_da_{days_after}.pkl")
+        file_name = join(self.eddies_folder, f"preloaded_db_{days_before}_da_{days_after}_submean.pkl")
         self.preload_file = file_name
         print(f"Searching preloaded file: {file_name}")
         if os.path.exists(file_name):
@@ -57,6 +57,10 @@ class EddyDataset(Dataset):
 
     def __preload__(self):
         start_time = time.time()
+        prev_lats = None
+        prev_lons = None
+        prev_ssh_month = None
+        prev_ssh_file = None
         for idx in range(self.total_days):
             try: 
                 loaded_files = np.sum(np.array([1 if d["data"] is not None else 0 for d in self.data]))
@@ -70,13 +74,20 @@ class EddyDataset(Dataset):
                 month, day_month = get_month_and_day_of_month_from_day_of_year(day_year)
                 start_date = datetime.strptime(f"{year}-{month}-{day_month}", "%Y-%m-%d")
                 # Reading current day
-                c_ssh, _, _ = read_ssh_by_date(start_date, self.ssh_folder, self.bbox, self.output_resolution)
-                c_ssh = np.nan_to_num(c_ssh.reshape(1, c_ssh.shape[0], c_ssh.shape[1]), 0)
-                ssh_all = c_ssh
+                c_ssh, prev_lats, prev_lons, prev_ssh_month, prev_ssh_file = read_ssh_by_date_fast(start_date, 
+                                                                                                   self.ssh_folder, self.bbox, self.output_resolution,
+                                                                                                   prev_ssh_month, prev_ssh_file, prev_lats, prev_lons)
+                # Substract mean nonnan values to SSH
+                c_ssh = c_ssh - np.nanmean(c_ssh)
+                ssh_all = np.nan_to_num(c_ssh.reshape(1, c_ssh.shape[0], c_ssh.shape[1]), 0)
                 # Reading days before
                 for i in range(self.days_before):
                     c_date = start_date - timedelta(days=i)
-                    c_ssh, _, _ = read_ssh_by_date(c_date, self.ssh_folder, self.bbox, self.output_resolution)
+                    c_ssh, prev_lats, prev_lons, prev_ssh_month, prev_ssh_file = read_ssh_by_date_fast(c_date, 
+                                                                                                   self.ssh_folder, self.bbox, self.output_resolution,
+                                                                                                   prev_ssh_month, prev_ssh_file, prev_lats, prev_lons)
+                    # Substract mean nonnan values to SSH
+                    c_ssh = c_ssh - np.nanmean(c_ssh)
                     c_ssh = np.nan_to_num(c_ssh.reshape(1, c_ssh.shape[0], c_ssh.shape[1]), 0)
                     # Concatenate previous days
                     ssh_all = np.concatenate((ssh_all, c_ssh), axis=0)
@@ -84,7 +95,11 @@ class EddyDataset(Dataset):
                 # Reading days after
                 for i in range(self.days_after):
                     c_date = start_date - timedelta(days=i)
-                    c_ssh, _, _ = read_ssh_by_date(c_date, self.ssh_folder, self.bbox, self.output_resolution)
+                    c_ssh, prev_lats, prev_lons, prev_ssh_month, prev_ssh_file = read_ssh_by_date_fast(c_date, 
+                                                                                                   self.ssh_folder, self.bbox, self.output_resolution,
+                                                                                                   prev_ssh_month, prev_ssh_file, prev_lats, prev_lons)
+                    # Substract mean nonnan values to SSH
+                    c_ssh = c_ssh - np.nanmean(c_ssh)
                     c_ssh = np.nan_to_num(c_ssh.reshape(1, c_ssh.shape[0], c_ssh.shape[1]), 0)
                     # Concatenate previous days
                     ssh_all = np.concatenate((ssh_all, c_ssh), axis=0)
@@ -95,9 +110,8 @@ class EddyDataset(Dataset):
 
                 self.data[idx]["data"] = ssh_all[:, :, :].astype(np.float32), eddies_masks[:, :, :].astype(np.float32)
             except Exception as e:
-                print(f"Error reading file {idx}, {self.eddies_paths[idx]}: {e}")
+                print(f"Error reading file {idx}, {self.eddies_paths[idx]} date: {year}-{month}-{day_month}: {e}")
                 # Remove this file from the list
-
                 continue
 
         # Check all the files at self.data are loaded

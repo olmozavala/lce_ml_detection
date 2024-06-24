@@ -19,6 +19,11 @@ import cmocean.cm as cm
 from os.path import join
 import time
 
+torch.set_num_threads(128)
+# kill %1 
+# cmd+z --> pauses
+# cmd+c --> kills
+
 #%% ----- DataLoader --------
 
 def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
@@ -36,19 +41,24 @@ def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
     bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used in preprocessing
     output_resolution = 0.1
 
-    if run == "shared":
-        aviso_folder = "/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM"
-        eddies_folder = join("/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022", input_folder)
-        output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022"
-    elif run == "local":
-        aviso_folder = "/conda/ozavala/data/GoM"
-        eddies_folder = join("/conda/ozavala/data/PreprocContours_ALL_1993_2022", input_folder)
-        output_folder = "/conda/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022"
-    elif run == "ram":
-        aviso_folder = "/dev/shm/ozavala/data/GoM"
-        eddies_folder = join("/dev/shm/ozavala/data/PreprocContours_ALL_1993_2022", input_folder)
-        output_folder = "/dev/shm/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022"
-
+    aviso_folder = "/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM"
+    eddies_folder = join("/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022_gaps_filled", input_folder)
+    output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled_submean"
+    # if run == "shared":
+    #     aviso_folder = "/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM"
+    #     eddies_folder = join("/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022_gaps_filled", input_folder)
+    #     # output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022"
+    #     output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled"
+    # elif run == "local":
+    #     aviso_folder = "/conda/ozavala/data/GoM"
+    #     eddies_folder = join("/conda/ozavala/data/PreprocContours_ALL_1993_2022", input_folder)
+    #     # output_folder = "/conda/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022"
+    #     output_folder = "/conda/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled"
+    # elif run == "ram":
+    #     aviso_folder = "/dev/shm/ozavala/data/GoM"
+    #     eddies_folder = join("/dev/shm/ozavala/data/PreprocContours_ALL_1993_2022", input_folder)
+    #     # output_folder = "/dev/shm/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022"
+    #     output_folder = "/dev/shm/ozavala/data/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled"
 
     model_name = f"DaysBefore_{days_before}_DaysAfter_{days_after}_{input_folder}"
 
@@ -69,10 +79,9 @@ def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
     print("Total number of validation samples: ", len(val_dataset))
 
     # Create DataLoaders for training and validation
-    workers = 16  # For some reason, if I set the number of workers I can't store all the data in memory
-    # train_loader = DataLoader(train_dataset, batch_size=80, shuffle=True, num_workers=workers)
-    # val_loader = DataLoader(val_dataset, batch_size=10, num_workers=workers)
-
+    # TODO the number of workers should be related to the number of processors in the system (90% maybe)
+    workers = 32 # For some reason, if I set the number of workers I can't store all the data in memory
+    # train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=workers)
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=workers)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=True, num_workers=workers)
     print("Done loading data!")
@@ -96,6 +105,8 @@ def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
     model = select_model(Models.UNET_2D, num_levels=4, cnn_per_level=2, input_channels=1+days_before+days_after,
                          output_channels=1, start_filters=32, kernel_size=3).to(device)
 
+    
+
     loss_func = dice_loss
     optimizer = optim.Adam(model.parameters(), lr=0.001)
 
@@ -110,30 +121,41 @@ def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
 
 
 # %%
-all_input_folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20]]
-all_days_before = [0, 1, 2, 6]
-all_days_after = [0, 5]
+all_input_folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20, 30]]
+all_days_before = [0, 1, 2]
+# use_after_days = [False, True]
+use_after_days = [False]
 
 # -------------------- Parallel training --------------------
-# mp.set_start_method('spawn')
+mp.set_start_method('spawn')
 NUM_PROC = 4
 i = 0
-runs_per_model = 3
+runs_per_model = 2
 for run in range(runs_per_model):
-    for days_after in all_days_after:
-        for days_before in all_days_before:
+    for days_before in all_days_before:
+        for use_after in use_after_days:
             for input_folder in all_input_folders:
                 gpu = i % NUM_PROC
-                p = mp.Process(target=parallel_training, args=(gpu, days_before, days_after, input_folder, "shared"))
+                # run WITH plus days the same as the run
+                if use_after:
+                    days_after = int(input_folder.split("_")[0].replace("days", ""))
+                    p = mp.Process(target=parallel_training, args=(gpu, days_before, days_after, input_folder, "shared"))
+                else:
+                    p = mp.Process(target=parallel_training, args=(gpu, days_before, 0, input_folder, "shared"))
                 p.start()
                 i += 1
-        # Wait until all the processes are finished
-        p.join()
-        print("After join")
-
+            # Wait until all the processes are finished
+            p.join()
+            print("After join")
 
 # --------------- Sequential training --------------------
-# for input_folder in all_input_folders:
-#     for days_before in all_days_before:
-#         for days_after in all_days_after:
-#             parallel_training(0, days_before, days_after, input_folder, run="shared")
+# source = "local" # shared local ram
+# for days_before in all_days_before:
+#     for use_after in use_after_days:
+#         for input_folder in all_input_folders:
+#             # run WITH plus days the same as the run
+#                 if use_after:
+#                     days_after = int(input_folder.split("_")[0].replace("days", ""))
+#                     parallel_training(0, days_before, days_after, input_folder, run=source)
+#                 else:
+#                     parallel_training(0, days_before, 0, input_folder, run=source)

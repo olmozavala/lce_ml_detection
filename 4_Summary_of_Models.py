@@ -13,8 +13,8 @@ sys.path.append("eoas_pyutils")
 from eoas_pyutils.io_utils.io_common import create_folder
 
 #%% ------ Define paths --------
-models_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022/models"
-output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022/Summary"
+models_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled_submean/models"
+output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled_submean/Summary"
 
 all_folders = os.listdir(models_folder)
 all_folders.sort()
@@ -49,6 +49,7 @@ for cur_model in all_folders:
 # Build a dictionary from data
 LOSS = "Loss value"
 LCV_LEN = "LCV length"
+
 df = {
     "Name": [x[0] for x in experiments],
     LOSS: [x[1] for x in experiments],
