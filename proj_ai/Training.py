@@ -61,22 +61,25 @@ def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epoch
             min_val_loss = cur_val_loss
             torch.save(model.state_dict(), join(models_folder, f'epoch_{epoch:02d}_loss_{min_val_loss:0.4f}.pt'))
 
-        writer.add_scalar('Loss/train', loss/len(train_loader.dataset), epoch)
-        writer.add_scalar('Loss/val', cur_val_loss, epoch)
-        # writer.add_scalars('train/val', {'training':loss/len(train_loader.dataset), 'validation':cur_val_loss}, global_step=epoch)
-        # writer.add_scalars('train/val', {'training':loss/len(train_loader.dataset), 'validation':cur_val_loss}, global_step=epoch)
+            # Just save images when the model is improved
+            _, (images, labels) = next(iter(val_loader))
+            images, labels = images.to(device), labels.to(device)
+            output = model(images)
+            # Here we should add some input output images to the tensorboard
+            imgs_to_show = 4
+            grid_images = torchvision.utils.make_grid( torch.flip(images[:imgs_to_show, :, :, :], dims=[1]), nrow=imgs_to_show)  # 4 images per row (only show one date)
+            grid_labels = torchvision.utils.make_grid( torch.flip(labels[:imgs_to_show, :, :, :], dims=[2]), nrow=imgs_to_show)  # 4 images per row
+            grid_outputs = torchvision.utils.make_grid(torch.flip(output[:imgs_to_show, :, :, :], dims=[2]), nrow=imgs_to_show)  # 4 images per row
+            # writer.add_image('input (validation)', grid_images, epoch)
+            writer.add_image('target (validation)', grid_labels, epoch)
+            writer.add_image('output (validation)', grid_outputs, epoch)
 
-        _, (images, labels) = next(iter(val_loader))
-        images, labels = images.to(device), labels.to(device)
-        output = model(images)
-        # Here we should add some input output images to the tensorboard
-        imgs_to_show = 4
-        grid_images = torchvision.utils.make_grid( torch.flip(images[:imgs_to_show, :, :, :], dims=[1]), nrow=imgs_to_show)  # 4 images per row (only show one date)
-        grid_labels = torchvision.utils.make_grid( torch.flip(labels[:imgs_to_show, :, :, :], dims=[2]), nrow=imgs_to_show)  # 4 images per row
-        grid_outputs = torchvision.utils.make_grid(torch.flip(output[:imgs_to_show, :, :, :], dims=[2]), nrow=imgs_to_show)  # 4 images per row
-        # writer.add_image('input (validation)', grid_images, epoch)
-        writer.add_image('target (validation)', grid_labels, epoch)
-        writer.add_image('output (validation)', grid_outputs, epoch)
+
+            writer.add_scalar('Loss/train', loss/len(train_loader.dataset), epoch)
+            writer.add_scalar('Loss/val', cur_val_loss, epoch)
+            # writer.add_scalars('train/val', {'training':loss/len(train_loader.dataset), 'validation':cur_val_loss}, global_step=epoch)
+            # writer.add_scalars('train/val', {'training':loss/len(train_loader.dataset), 'validation':cur_val_loss}, global_step=epoch)
+
         if epoch == 0:
             writer.add_graph(model, images)
 
@@ -88,4 +91,8 @@ def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epoch
 
     print("Done!")
     writer.close()
+    # Write a placeholder file to indicate that the training is done with tthe current time and best model found
+    with open(join(models_folder, 'training_done.txt'), 'w') as f:
+        f.write(f'Training done at {datetime.now()} with best model at epoch {best_last_epoch} with loss {min_val_loss}')
+
     return model

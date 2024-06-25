@@ -27,7 +27,7 @@ for cur_model in all_folders:
     cur_folder = join(models_folder, cur_model)
     if os.path.exists(cur_folder):
         print(F"Working with cur_model: {cur_model}")
-        all_models = os.listdir(cur_folder)
+        all_models = [x for x in os.listdir(cur_folder) if x.endswith(".pt")]
         min_loss = 100000.0
         best_model = {}
         # Iterate over the saved models for each cur_model and obtain the best of them
@@ -49,6 +49,9 @@ for cur_model in all_folders:
 # Build a dictionary from data
 LOSS = "Loss value"
 LCV_LEN = "LCV length"
+
+# Remove empty experiments
+experiments = [x for x in experiments if len(x) > 0]
 
 df = {
     "Name": [x[0] for x in experiments],

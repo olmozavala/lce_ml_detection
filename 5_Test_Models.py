@@ -2,6 +2,8 @@
 import os.path
 import torch
 from torch.utils.data import Dataset, DataLoader
+import torch.multiprocessing as mp
+import torch.distributed as dist
 import pandas as pd
 from os.path import join
 from proj_ai.Generators import EddyDataset
@@ -60,28 +62,30 @@ c_folder = 'PreprocContours_ALL_1993_2022'
 
 aviso_folder = "/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM"
 eddies_folder = "/nexsan/people/lhiron/UGOS/Lagrangian_eddy_altimetry/eddy_contours/gaps_filled/"
-output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled"
+def_preproc_folder = "/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022_gaps_filled"
+output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled_submean"
 summary_file = join(output_folder, "Summary", "summary.csv")
 
 bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used in preprocessing
 output_resolution = 0.1
 threshold = 0.05
 
-save_total = -1  # With -1 will save all there are
-batch_size = 32
+batch_size = 8
+save_predictions = True
+plot_every_x_batches = 10  #  Plot every 10 batches
+plot_y_images_in_batch = 4  # How many images to plot in each batch should be less than batch size
 
 # *********** Reads the parameters ***********
 df = pd.read_csv(summary_file)
 LCV_LEN = "LCV length"
 grouped = df.groupby(LCV_LEN)
 
-save_predictions = True
-save_imgs = False
 
-# %% Iterates over all the models in the file
-for lcv_length in [10, 5, 10, 20, 30]:
+def process_data(gpu, lcv_length):
+
+    device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
     input_folder = f"{lcv_length:02d}days_d0_Nx1000_nseeds400"
-    preproc_folder = join("/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022_gaps_filled_submean", input_folder)
+    preproc_folder = join(def_preproc_folder, input_folder)
     lcv_length_str = input_folder.split("_")[0].replace("days", "")
     # Choose the best model grouped by LCV_LEN = "LCV length"
     # Choose specific group
@@ -89,7 +93,6 @@ for lcv_length in [10, 5, 10, 20, 30]:
     group_data = grouped.get_group(lcv_length)
     group_data = group_data.sort_values(by="Loss value")
     model = group_data.iloc[0]
-    start_time = time.time()
     model_name = model["Name"]
     model_weights_file = model["Path"]
     print(F"Using Model: {model_name}")
@@ -125,15 +128,9 @@ for lcv_length in [10, 5, 10, 20, 30]:
 
     out_folder_predictions = join(c_output_folder, "Predictions")
     create_folder(out_folder_predictions)
-    # Working only with the test indexes
-    start_time = time.time() # Just for the first case not true
-
     for i, (file, (data, target)) in enumerate(test_loader):
-        if i > save_total and save_total > 0:
-            break
         data, target = data.to(device), target.to(device)
         output = model(data)
-        print(f"Time to process {batch_size} samples: ", time.time() - start_time)
 
         for j in range(data.shape[0]):
             # Gets the output as a mask
@@ -148,13 +145,12 @@ for lcv_length in [10, 5, 10, 20, 30]:
 
             start_time = time.time()
             file_name_parts = file[j].split("_")
-            print(file_name_parts) # eddies_altimetry_2019_05days_078.nc
+            print(f"model: {model_name} Working wiht file: {file_name_parts}") # eddies_altimetry_2019_05days_078.nc
             year = int(file_name_parts[2])
             day_year = int(file_name_parts[-1].replace(".nc",""))
             month, day_month = get_month_and_day_of_month_from_day_of_year(day_year, year)
             c_date = datetime.strptime(f"{year}-{month}-{day_month}", '%Y-%m-%d')
             c_date_str = f"{year}-{month}-{day_month}"
-            aviso_file = join(aviso_folder, f"{c_date.year}-{c_date.month:02d}.nc")
             contours_file = join(eddies_folder, input_folder, f"eddies_altimetry_{c_date.year}_{lcv_length_str}days_{day_year:03d}.mat")
             # print(f'Reading contours from {contours_file}')
             
@@ -185,7 +181,8 @@ for lcv_length in [10, 5, 10, 20, 30]:
             # Plotting some SSH data
             # Make a plot using cartopy and the data using lats and lons for bbox, ssh for the data, and plot the contours
             # =========== Manual plot =====================
-            if save_imgs:
+            if i % plot_every_x_batches == 0 and j < plot_y_images_in_batch:
+                print(f"------------------ Plotting {c_date_str} ----------------")
                 fig, ax = plt.subplots(1, 1, figsize=(15, 15), subplot_kw={'projection': ccrs.PlateCarree()})
                 ax.set_extent(bbox, crs=ccrs.PlateCarree())
                 ax.coastlines(resolution='10m')
@@ -236,3 +233,24 @@ for lcv_length in [10, 5, 10, 20, 30]:
                 #                         title=c_date_str, file_name_prefix=f"{model_name}_adt_target_prediction_{c_date_str}")
                 # viz_obj.plot_2d_data_xr({'LAVD': ssh, 'Prediction': pred}, var_names=['LAVD', 'Prediction'],
                 #                 title=[f'{c_date_str} Target', f'{c_date_str} Prediction'], file_name_prefix=f"{model_name}_prediction_adt{c_date}")
+    pass
+
+# main
+if __name__ == "__main__":
+    NUM_GPUs = 4 # Number of GPUs
+    try:
+        mp.set_start_method('spawn', force=True)
+    except RuntimeError:
+        pass  # Context has already been set
+
+    #  %% Iterates over all the models in the file and choose the one with the lowest validation loss for each LCV length
+    processes = []
+    for cur_gpu, lcv_length in enumerate([5, 10, 20, 30]):
+        # Working only with the test indexes
+        gpu = cur_gpu % NUM_GPUs
+        p = mp.Process(target=process_data, args=(gpu, lcv_length))
+        p.start()
+        processes.append(p)
+
+    for p in processes:
+        p.join()

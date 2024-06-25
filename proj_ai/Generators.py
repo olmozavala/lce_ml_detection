@@ -1,6 +1,9 @@
 # This notebook contains a **hello world** example of neural networks with PyTorch. Basically a linear regression approximation
 
 import sys
+# sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection/ai_common") # Just when running this file directly for testing
+# sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection/eoas_pyutils") # Just when running this file directly for testing
+# sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection") # Just when running this file directly for testing
 sys.path.append("eoas_pyutils")
 sys.path.append("ai_common")
 import time
@@ -127,6 +130,7 @@ class EddyDataset(Dataset):
     def __getitem__(self, idx):
         while self.data[idx]["data"] is None:
             idx = (idx + 1) % self.total_days
+        # print(f"Returning data for index {idx} shape: {self.data[idx]['data'][0].shape} file {self.data[idx]['file']}")
         return self.data[idx]["file"],  self.data[idx]["data"]
 
 
@@ -138,7 +142,7 @@ if __name__ == "__main__":
     # print(x)
     # ----------- Skynet ------------
     data_folder = "/unity/f1/ozavala/DATA/"
-    preproc_eddies_folder = "/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours2024/"
+    preproc_eddies_folder = "/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022_gaps_filled"
 
     tested_folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20, 30]]
 

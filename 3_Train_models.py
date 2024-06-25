@@ -8,7 +8,6 @@ from torch.utils.data import Dataset, DataLoader
 from torch.utils.data import DataLoader, Dataset, random_split
 
 # Local libraries
-import torch.multiprocessing as mp
 import multiprocessing as mp
 from proj_ai.Training import train_model
 from proj_ai.Generators import EddyDataset
@@ -80,7 +79,7 @@ def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
 
     # Create DataLoaders for training and validation
     # TODO the number of workers should be related to the number of processors in the system (90% maybe)
-    workers = 32 # For some reason, if I set the number of workers I can't store all the data in memory
+    workers = 2 # For some reason, if I set the number of workers I can't store all the data in memory
     # train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=workers)
     train_loader = DataLoader(train_dataset, batch_size=128, shuffle=True, num_workers=workers)
     val_loader = DataLoader(val_dataset, batch_size=16, shuffle=True, num_workers=workers)
@@ -123,17 +122,15 @@ def parallel_training(gpu, days_before, days_after, input_folder, run="shared"):
 # %%
 all_input_folders = [f"{x:02d}days_d0_Nx1000_nseeds400" for x in [5, 10, 20, 30]]
 all_days_before = [0, 1, 2]
-# use_after_days = [False, True]
-use_after_days = [False]
+use_after_days = [False, True]
 
 # -------------------- Parallel training --------------------
-mp.set_start_method('spawn')
 NUM_PROC = 4
 i = 0
 runs_per_model = 2
 for run in range(runs_per_model):
-    for days_before in all_days_before:
-        for use_after in use_after_days:
+    for use_after in use_after_days:
+        for days_before in all_days_before:
             for input_folder in all_input_folders:
                 gpu = i % NUM_PROC
                 # run WITH plus days the same as the run
@@ -144,9 +141,9 @@ for run in range(runs_per_model):
                     p = mp.Process(target=parallel_training, args=(gpu, days_before, 0, input_folder, "shared"))
                 p.start()
                 i += 1
-            # Wait until all the processes are finished
-            p.join()
-            print("After join")
+        # Wait until all the processes are finished
+        p.join()
+        print("After join")
 
 # --------------- Sequential training --------------------
 # source = "local" # shared local ram
