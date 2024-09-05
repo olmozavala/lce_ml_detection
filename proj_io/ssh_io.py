@@ -89,5 +89,66 @@ def read_ssh_by_date_fast(c_date, ssh_folder, bbox, output_resolution,
         ssh_month = ssh_month.interp(latitude=lats, longitude=lons)  # Increase output_resolution
 
 
-    ssh = ssh_month['adt'][c_date.day - 1, :, :].data
+    ssh = ssh_month['adt'][c_date.day - 1, :, :].data # -1 because it goes from 0 to 30
     return ssh, lats, lons, ssh_month, ssh_file
+
+def read_sst_by_date_fast(c_date, sst_folder, bbox, lats, lons,
+                          prev_sst_data=None, prev_sst_file=None):
+    '''
+    Reads the sst data for the given date and interpolates to the desired resolution
+    Args:
+        c_date:
+
+    Returns:
+    '''
+    sst_file = join(sst_folder, f"OSTIA_SST_{c_date.year}.nc")
+    use_prev = False
+
+    if prev_sst_file is not None:
+        if prev_sst_file == sst_file:
+            use_prev = True
+
+    if use_prev:
+        sst_year = prev_sst_data
+    else:
+        sst_year = xr.open_dataset(sst_file)
+        sst_year = sst_year.sel(latitude=slice(bbox[0], bbox[1]),
+                                longitude=slice(bbox[2], bbox[3]))
+
+        sst_year = sst_year.interp(latitude=lats, longitude=lons)  # Increase output_resolution
+
+    assert lats.shape == sst_year.latitude.shape
+    assert lons.shape == sst_year.longitude.shape
+
+    day_of_year = c_date.timetuple().tm_yday
+    sst = sst_year['analysed_sst'][day_of_year - 1, :, :].data
+    return sst, sst_year, sst_file
+
+def read_chlora_by_date_fast(c_date, chlora_folder, bbox, lats=None, lons=None,
+                          prev_chlora_year=None, prev_chlora_file=None):
+
+    chlora_file = join(chlora_folder, f"Ocean_Color_{c_date.year}.nc")
+    use_prev = False
+
+    if prev_chlora_file is not None:
+        if prev_chlora_file == chlora_file:
+            use_prev = True
+
+    if use_prev:
+        chlora_data = prev_chlora_year
+    else:
+        chlora_data = xr.open_dataset(chlora_file, decode_times=False)
+        chlora_data = chlora_data.sel(latitude=slice(bbox[0], bbox[1]),
+                                longitude=slice(bbox[2], bbox[3]))
+
+        if (lats is not None) and (lons is not None):
+            chlora_data = chlora_data.interp(latitude=lats, longitude=lons) 
+
+    if (lats is not None) and (lons is not None):
+        assert lats.shape == chlora_data.latitude.shape
+        assert lons.shape == chlora_data.longitude.shape
+
+    day_of_year = c_date.timetuple().tm_yday
+    chlora = chlora_data['CHL'][day_of_year - 1, :, :].data
+
+    return chlora, chlora_data, chlora_file

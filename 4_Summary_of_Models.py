@@ -13,8 +13,12 @@ sys.path.append("eoas_pyutils")
 from eoas_pyutils.io_utils.io_common import create_folder
 
 #%% ------ Define paths --------
-models_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled_submean/models"
-output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled_submean/Summary"
+run_type = "sst_chlora"
+# run_type = "only_ssh"
+# root_output_folder = f"/unity/f1/ozavala/OUTPUTS/single_stream/EddyDetection_ALL_1993-2022_gaps_filled_submean_{run_type}"
+root_output_folder = f"/unity/f1/ozavala/OUTPUTS/single_stream/EddyDetection_ALL_1998-2022_gaps_filled_submean_{run_type}"
+models_folder = join(root_output_folder,"models")
+output_folder = join(root_output_folder,"Summary")
 
 all_folders = os.listdir(models_folder)
 all_folders.sort()
@@ -26,7 +30,7 @@ experiments = []
 for cur_model in all_folders:
     cur_folder = join(models_folder, cur_model)
     if os.path.exists(cur_folder):
-        print(F"Working with cur_model: {cur_model}")
+        # print(F"Working with cur_model: {cur_model}")
         all_models = [x for x in os.listdir(cur_folder) if x.endswith(".pt")]
         min_loss = 100000.0
         best_model = {}
@@ -43,10 +47,10 @@ for cur_model in all_folders:
                 days_after = int(name.split('_')[3])
                 lcv_length = int((name.split('_')[4]).replace("days",""))
                 best_model = [name, loss, path, days_before, days_after, lcv_length]
-        print(best_model)
+        # print(best_model)
         experiments.append(best_model)
 
-# Build a dictionary from data
+# Build a dictionary from datagg
 LOSS = "Loss value"
 LCV_LEN = "LCV length"
 
@@ -62,7 +66,7 @@ df = {
     LCV_LEN: [x[5] for x in experiments],
 }
 summary = pd.DataFrame.from_dict(df)
-print(F"Models summary: {summary}")
+# print(F"Models summary: {summary}")
 
 create_folder(output_folder)
 summary = summary.sort_values(by="Loss value")
@@ -73,18 +77,18 @@ output_file = join(output_folder,"summary.jpg")
 fig, ax = plt.subplots(figsize=(10,6))
 grouped = summary.groupby(LCV_LEN)
 for group_key, group_data in grouped:
-    print(group_key, group_data)
+    # print(group_key, group_data)
     names = group_data.Name.values
-    names = [f'-{x.split("_")[1]} +{x.split("_")[3]}' for x in names]
+    names = [f'-{x.split("_")[1]}+{x.split("_")[3]}' for x in names]
     losses = group_data[LOSS].values
     ax.scatter(range(len(losses)), losses, label=group_key)
 
     for i, label in enumerate(names):
         ax.annotate(label, (i, losses[i]), textcoords="offset points",
-                    xytext=(5, -15), ha='left', va='center', rotation=0, fontsize=12)
+                    xytext=(5,-5), ha='left', va='center', rotation=0, fontsize=12)
 
 ax.legend()
-ax.set_title(F"Best Validation Loss by Model Run", fontsize=16)
+ax.set_title(F"Best Validation Loss by Model Run {run_type}", fontsize=16)
 # ax.set_xlim(-0.5, len(names)-0.2)
 # ax.set_ylim(0.052, 0.078)
 # ax.grid(True)

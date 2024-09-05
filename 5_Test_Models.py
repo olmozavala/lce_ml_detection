@@ -12,6 +12,7 @@ from datetime import datetime
 import cartopy.crs as ccrs
 import cmocean
 from matplotlib.colors import LinearSegmentedColormap
+from matplotlib.colors import LogNorm
 from cartopy.mpl.gridliner import LONGITUDE_FORMATTER, LATITUDE_FORMATTER
 import cv2
 
@@ -35,6 +36,8 @@ from io_utils.dates_utils import get_month_and_day_of_month_from_day_of_year
 from models.ModelsEnum import Models
 from models.ModelSelector import select_model
 
+os.environ['PYDEVD_WARN_EVALUATION_TIMEOUT'] = '30000'
+os.environ['PYDEVD_UNBLOCK_THREADS_TIMEOUT'] = '5000'
 
 def getExtent(lats, lons, expand_ext=0.0):
     minLat = np.amin(lats).item() - expand_ext
@@ -56,32 +59,29 @@ cdict = {'red':   ((0.0, 0.0, 0.0),
 yellow_cmap = LinearSegmentedColormap('YellowCMap', segmentdata=cdict)
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-# From project
-c_folder = 'PreprocContours_ALL_1993_2022'
 
+data_folder = "/unity/f1/ozavala/DATA/"
+ssh_folder = join(data_folder, "GOFFISH/AVISO/GoM")
+sst_folder = join(data_folder, "GOFFISH/SST/OSTIA")
+chlora_folder = join(data_folder, "GOFFISH/CHLORA/COPERNICUS")
 
-aviso_folder = "/unity/f1/ozavala/DATA/GOFFISH/AVISO/GoM"
 eddies_folder = "/nexsan/people/lhiron/UGOS/Lagrangian_eddy_altimetry/eddy_contours/gaps_filled/"
 def_preproc_folder = "/unity/f1/ozavala/DATA/GOFFISH/EddyDetection/PreprocContours_ALL_1993_2022_gaps_filled"
-output_folder = "/unity/f1/ozavala/OUTPUTS/EddyDetection_ALL_1993_2022_gaps_filled_submean"
-summary_file = join(output_folder, "Summary", "summary.csv")
+
+start_year = 1998
 
 bbox = [18.125, 32.125, 260.125 - 360, 285.125 - 360]  # These bbox needs to be the same used in preprocessing
 output_resolution = 0.1
 threshold = 0.05
 
-batch_size = 8
+batch_size = 128
 save_predictions = True
-plot_every_x_batches = 10  #  Plot every 10 batches
+plot_every_x_batches = 5 #  Plot every x batches
 plot_y_images_in_batch = 4  # How many images to plot in each batch should be less than batch size
 
-# *********** Reads the parameters ***********
-df = pd.read_csv(summary_file)
-LCV_LEN = "LCV length"
-grouped = df.groupby(LCV_LEN)
 
 
-def process_data(gpu, lcv_length):
+def process_data(gpu, grouped_df, lcv_length, start_year, only_ssh, output_folder, zero_days_after=False):
 
     device = torch.device(f"cuda:{gpu}" if torch.cuda.is_available() else "cpu")
     input_folder = f"{lcv_length:02d}days_d0_Nx1000_nseeds400"
@@ -90,9 +90,14 @@ def process_data(gpu, lcv_length):
     # Choose the best model grouped by LCV_LEN = "LCV length"
     # Choose specific group
     # Get the model with the minimum loss descending
-    group_data = grouped.get_group(lcv_length)
+    group_data = grouped_df.get_group(lcv_length)
     group_data = group_data.sort_values(by="Loss value")
-    model = group_data.iloc[0]
+    # We need to be sure that the selected model doesn't use future days. 
+    if zero_days_after:
+        model = group_data[(group_data["Days after"] == 0)].iloc[0]
+    else:
+        model = group_data.iloc[0]
+
     model_name = model["Name"]
     model_weights_file = model["Path"]
     print(F"Using Model: {model_name}")
@@ -100,7 +105,10 @@ def process_data(gpu, lcv_length):
     days_before = int(model_name.split("_")[1])
     days_after = int(model_name.split("_")[3])
 
-    dataset = EddyDataset(aviso_folder, preproc_folder, bbox, output_resolution, days_before=days_before, days_after=days_after)
+    dataset = EddyDataset(ssh_folder, sst_folder, chlora_folder, preproc_folder, bbox, output_resolution, 
+                                      days_before=days_before, days_after=days_after, start_year=start_year, 
+                                      only_ssh=only_ssh, multi_stream=False)
+
     total_size = len(dataset)
     train_size = int(0.8 * total_size)
     val_size = int(0.1 * total_size)
@@ -111,13 +119,20 @@ def process_data(gpu, lcv_length):
     test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
     print("Total number of test samples: ", len(test_dataset))
 
+
     c_output_folder = join(output_folder,"TestModels", model_name)
+
     create_folder(c_output_folder)
 
     # *********** Reads the weights***********
+    if only_ssh:
+        input_channels = 1 + days_before + days_after
+    else:
+        input_channels = 3 + 3*(days_before+days_after)
+
     print("Initializing model...")
-    model = select_model(Models.UNET_2D, num_levels=4, cnn_per_level=2, input_channels=1+days_before+days_after,
-                        output_channels=1, start_filters=32, kernel_size=3).to(device)
+    model = select_model(Models.UNET_2D, num_levels=4, cnn_per_level=2, input_channels=input_channels,
+                         output_channels=1, start_filters=32, kernel_size=3).to(device)
     print('Reading model ....')
     model.load_state_dict(torch.load(model_weights_file, map_location=device))
     model.to(device)
@@ -128,11 +143,12 @@ def process_data(gpu, lcv_length):
 
     out_folder_predictions = join(c_output_folder, "Predictions")
     create_folder(out_folder_predictions)
-    for i, (file, (data, target)) in enumerate(test_loader):
+    for i, (file, (data, target)) in enumerate(test_loader): # Iterate over the batches of the test_loader
+        # Plot the intput data
         data, target = data.to(device), target.to(device)
         output = model(data)
 
-        for j in range(data.shape[0]):
+        for j in range(data.shape[0]): # Iterate over the images in the batch
             # Gets the output as a mask
             cur_target = target[j, 0, :, :].detach().cpu().numpy()
             cur_target = np.where(cur_target == 0, np.nan, cur_target)
@@ -145,7 +161,7 @@ def process_data(gpu, lcv_length):
 
             start_time = time.time()
             file_name_parts = file[j].split("_")
-            print(f"model: {model_name} Working wiht file: {file_name_parts}") # eddies_altimetry_2019_05days_078.nc
+            print(f"model: {model_name} Working with file: {file_name_parts}") # eddies_altimetry_2019_05days_078.nc
             year = int(file_name_parts[2])
             day_year = int(file_name_parts[-1].replace(".nc",""))
             month, day_month = get_month_and_day_of_month_from_day_of_year(day_year, year)
@@ -155,13 +171,12 @@ def process_data(gpu, lcv_length):
             # print(f'Reading contours from {contours_file}')
             
             # reads the corresponing ad and makes the masks and obtains the corresponding polygons contours
-            ssh, lats, lons = read_ssh_by_date(c_date, aviso_folder, bbox=bbox, output_resolution=output_resolution)
+            ssh, lats, lons = read_ssh_by_date(c_date, ssh_folder, bbox=bbox, output_resolution=output_resolution)
             contours_mask = np.zeros_like(ssh)
             all_contours_polygons, contours_mask = read_contours_mask_and_polygons(contours_file, contours_mask, lats, lons)
 
             # Contours from prediction
             output_mask = cv2.threshold(pred, 0.5, 1, cv2.THRESH_BINARY)[1]
-            countours, _ = cv2.findContours(output_mask.astype(np.uint8), cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
 
             # Save the prediction as a netcdf file using xarray
             if save_predictions:
@@ -182,6 +197,39 @@ def process_data(gpu, lcv_length):
             # Make a plot using cartopy and the data using lats and lons for bbox, ssh for the data, and plot the contours
             # =========== Manual plot =====================
             if i % plot_every_x_batches == 0 and j < plot_y_images_in_batch:
+                print(f"------------------ Plotting Inputs for {c_date_str} ----------------")
+                cpu_data = data.cpu().detach().numpy()
+
+                if not(only_ssh):
+                    viz_obj = EOAImageVisualizer(lats=lats, lons=lons, contourf=False, disp_images=False,
+                                                    background=BackgroundType.BLUE_MARBLE_HR,
+                                                    max_imgs_per_row = 4,
+                                                    output_folder=c_output_folder)
+                    viz_obj.__setattr__('additional_polygons', [Polygon(x) for x in all_contours_polygons])
+                    p = j # Which batch to plot
+                    tot = days_before+days_after+1 # days_before+days_after+current
+                    if tot > 4:
+                        input_data = {
+                            'adt': cpu_data[p,0,:,:],
+                            'sst': cpu_data[p,tot,:,:],
+                            'chlora': cpu_data[p,tot*2,:,:],
+                            'diff': cpu_data[p,0,:,:] - cpu_data[p,p-1,:,:],
+                            'adt2': cpu_data[p,1,:,:],
+                            'sst2': cpu_data[p,tot+1,:,:],
+                            'chlora2': cpu_data[p,tot*2+1,:,:],
+                            'diff2': cpu_data[p,tot,:,:] - cpu_data[p,tot+p-1,:,:],
+                            'adt3': cpu_data[p,2,:,:],
+                            'sst3': cpu_data[p,tot+2,:,:],
+                            'chlora3': cpu_data[p,tot*2+2,:,:],
+                            'diff3': cpu_data[p,tot*2,:,:] - cpu_data[p,tot*2+p-1,:,:],
+                            } 
+                        
+                        viz_obj.plot_2d_data_xr(input_data, 
+                                                var_names=['adt','sst','chlora','diff','adt2','sst2','chlora2','diff2','adt3','sst3','chlora3','diff3'],
+                                                title=f"Input SSH, SST, CHLORA, {c_date_str}", file_name_prefix=f"B{i}_I{j}_{model_name}_Input_Data_{c_date_str}")
+                                            # norm=[None, None, LogNorm(0.001, 10)])
+
+
                 print(f"------------------ Plotting {c_date_str} ----------------")
                 fig, ax = plt.subplots(1, 1, figsize=(15, 15), subplot_kw={'projection': ccrs.PlateCarree()})
                 ax.set_extent(bbox, crs=ccrs.PlateCarree())
@@ -237,20 +285,53 @@ def process_data(gpu, lcv_length):
 
 # main
 if __name__ == "__main__":
+
+    start_year = 1998
+    # only_ssh_opts = [False, True]
+    only_ssh_opts = [False]
+    # zero_days_after_opts = [True, False]
+    zero_days_after_opts = [True]
+
+    # %% =================== Parallel RUN =======================
     NUM_GPUs = 4 # Number of GPUs
     try:
         mp.set_start_method('spawn', force=True)
     except RuntimeError:
         pass  # Context has already been set
 
-    #  %% Iterates over all the models in the file and choose the one with the lowest validation loss for each LCV length
+    #  Iterates over all the models in the file and choose the one with the lowest validation loss for each LCV length
     processes = []
-    for cur_gpu, lcv_length in enumerate([5, 10, 20, 30]):
-        # Working only with the test indexes
-        gpu = cur_gpu % NUM_GPUs
-        p = mp.Process(target=process_data, args=(gpu, lcv_length))
-        p.start()
-        processes.append(p)
+    cur_gpu = 0
 
-    for p in processes:
-        p.join()
+    for zero_days_after in zero_days_after_opts:
+        for only_ssh in only_ssh_opts:
+            if only_ssh: 
+                output_folder = f"/unity/f1/ozavala/OUTPUTS/single_stream/EddyDetection_ALL_{start_year}-2022_gaps_filled_submean_only_ssh"
+            else:
+                output_folder = f"/unity/f1/ozavala/OUTPUTS/single_stream/EddyDetection_ALL_{start_year}-2022_gaps_filled_submean_sst_chlora"
+
+            summary_file = join(output_folder, "Summary", "summary.csv")
+
+            # *********** Reads the parameters ***********
+            df = pd.read_csv(summary_file)
+            LCV_LEN = "LCV length"
+            grouped_df = df.groupby(LCV_LEN)
+
+            for lcv_length in [5, 10, 20, 30]:
+                print(f"################# Working with LCV length: {lcv_length} only ssh {only_ssh} zero days after {zero_days_after} #################")
+                # Working only with the test indexes
+                gpu = cur_gpu % NUM_GPUs
+                p = mp.Process(target=process_data, args=(gpu, grouped_df, lcv_length, start_year, only_ssh, output_folder, zero_days_after))
+                p.start()
+                processes.append(p)
+                cur_gpu += 1
+
+        for p in processes:
+            p.join()
+
+    # %% =================== Secuential RUN =======================
+    # gpu = 2
+    # only_ssh = False
+    # lcv_length = 5
+    # zero_days_after = False
+    # process_data(gpu, lcv_length, start_year, only_ssh)
