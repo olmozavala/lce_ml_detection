@@ -1,9 +1,9 @@
 # This notebook contains a **hello world** example of neural networks with PyTorch. Basically a linear regression approximation
 
 import sys
-sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection/ai_common") # Just when running this file directly for testing
-sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection/eoas_pyutils") # Just when running this file directly for testing
-sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection") # Just when running this file directly for testing
+sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection/ai_common")
+sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection/eoas_pyutils")
+sys.path.append("/unity/f1/ozavala/CODE/lce_ml_detection")
 # sys.path.append("eoas_pyutils")
 # sys.path.append("ai_common")
 import time
@@ -21,6 +21,24 @@ import pickle
 
 ## ------- Custom dataset ------
 class EddyDataset(Dataset):
+    """PyTorch Dataset for loading eddy tracking data.
+    
+    Loads and preprocesses eddy tracking data, including optional SSH, SST
+    and chlorophyll data. Can preload data to disk for faster access.
+    
+    Args:
+        eddies_folder: Directory containing eddy data
+        days_before: Number of days before eddy detection to include
+        days_after: Number of days after detection
+        bbox: Geographic bounding box
+        output_resolution: Output image resolution
+        only_ssh: Whether to load only SSH data
+        start_year: Optional start year to filter data
+        
+    Attributes:
+        data: Loaded and preprocessed data
+        preload_file: Path to cached data file if used
+    """
 
     def __init__(self, ssh_folder, sst_folder, chlora_folder, eddies_folder, bbox=[18.125, 32.125, -100.125, -74.875], output_resolution=0.125,
                  days_before = 0, days_after = 0, transform=None, start_year=None, only_ssh=False, multi_stream=False):

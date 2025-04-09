@@ -1,9 +1,23 @@
 import torch.nn as nn
 import torch
 from collections import OrderedDict
-from typing import Type, Union, Tuple
+from typing import Type
 
 class EncoderDecoderBlock(nn.Module):
+    """A block containing convolutional layers with optional batch norm and transpose conv.
+    
+    Used as a building block for encoder-decoder architectures like U-Net.
+    
+    Args:
+        level: Integer indicating the level in the network architecture
+        cnn_per_level: Number of CNN layers per block
+        activation: PyTorch activation function class
+        in_filters: Number of input channels
+        out_filters: Number of output channels
+        kernel_size: Size of convolutional kernels
+        add_transpose: Whether to add transpose conv layer at end
+        batch_norm: Whether to use batch normalization
+    """
     def __init__(self, level, cnn_per_level=2, activation=nn.ReLU, in_filters=8, out_filters=16, kernel_size=3,
                  add_transpose=False, batch_norm=True):
         super().__init__()

@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torchvision
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 from os.path import join
@@ -10,6 +9,23 @@ import torch.optim.lr_scheduler as lr_scheduler
 
 def train_model(model, optimizer, loss_func, train_loader, val_loader, num_epochs, device, 
                 output_folder='training', model_name='', multi_stream=False):
+    """Trains a PyTorch model with the specified parameters and saves checkpoints.
+    
+    Args:
+        model: PyTorch model to train
+        optimizer: PyTorch optimizer instance
+        loss_func: Loss function to use for training
+        train_loader: DataLoader for training data
+        val_loader: DataLoader for validation data 
+        num_epochs: Number of epochs to train for
+        device: Device to train on ('cuda' or 'cpu')
+        output_folder: Directory to save model checkpoints and logs
+        model_name: Name prefix for saved model files
+        multi_stream: Whether model accepts multiple input streams
+        
+    Returns:
+        None - Model checkpoints are saved to disk
+    """
 
     cur_time = datetime.now()
     model_name = f'{model_name}_{cur_time.strftime("%Y-%m-%d_%H_%M")}'
